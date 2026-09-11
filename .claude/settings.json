@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx eslint *)",
+      "Bash(npx vitest *)",
+      "Bash(npx tsc *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(pnpm vitest *)",
+      "Bash(pnpm exec *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"const c=[];process.stdin.on('data',d=>c.push(d));process.stdin.on('end',()=>{const d=JSON.parse(Buffer.concat(c).toString('utf8'));const s=d.tool_input.content||d.tool_input.new_string||'';if(s.includes('\\u2014')){console.log(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',permissionDecision:'deny',permissionDecisionReason:'Em-dash (U+2014) found. Em-dashes break PowerShell 5.1 parsing in files without a UTF-8 BOM. Replace with a hyphen or double-hyphen (--).'}}))}})\""
+          }
+        ]
+      }
+    ]
+  },
+  "includeCoAuthoredBy": false
+}

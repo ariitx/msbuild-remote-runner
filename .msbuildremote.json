@@ -1,0 +1,12 @@
+{
+  "host": "10.211.55.3",
+  "user": "ari",
+  "identityFile": "~/.ssh/parallels_vm",
+  "msbuildPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\MSBuild\\Current\\Bin\\MSBuild.exe",
+  "solutionPath": "\\\\Mac\\Home\\path\\to\\YourProject\\YourProject.sln",
+  "configuration": "Release",
+  "target": "Rebuild",
+  "iisExpressPath": "C:\\Program Files\\IIS Express\\iisexpress.exe",
+  "sitePath": "\\\\Mac\\Home\\path\\to\\YourProject",
+  "port": 8080
+}

@@ -1,0 +1,5 @@
+src/**
+tsconfig.json
+.msbuildremote.example.json
+**/*.map
+.gitignore

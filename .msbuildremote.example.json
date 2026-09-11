@@ -1,0 +1,37 @@
+{
+  "host": "10.211.55.3",
+  "user": "ari",
+  "identityFile": "~/.ssh/parallels_vm",
+  "msbuildPath": "C:\\Program Files\\Microsoft Visual Studio\\2022\\Enterprise\\MSBuild\\Current\\Bin\\MSBuild.exe",
+  "solutionPath": "\\\\Mac\\Home\\path\\to\\WebApplication\\WebApplication.sln",
+  "configuration": "Release",
+  "target": "Rebuild",
+
+  "_comment_single_site": "Used only when slnLaunchFile below is not set.",
+  "iisExpressPath": "C:\\Program Files\\IIS Express\\iisexpress.exe",
+  "sitePath": "\\\\Mac\\Home\\path\\to\\WebApplication",
+  "port": 8080,
+
+  "_comment_drive_mappings": "Optional. Map drive letter(s) before each Build/Run SSH command, e.g. when a postbuild event fails against a UNC path directly.",
+  "driveMappings": [
+    { "drive": "Z", "uncPath": "\\\\Mac\\Home\\" }
+  ],
+
+  "_comment_multi_site": "Set these to launch multiple projects together, driven by a Visual Studio .slnLaunch / .slnLaunch.user file.",
+  "slnLaunchFile": "WebApplication.slnLaunch.user",
+  "slnLaunchProfile": "Feature Profile",
+  "sites": [
+    {
+      "projectPath": "WebApplication\\WebApplication.csproj",
+      "name": "Web",
+      "sitePath": "\\\\Mac\\Home\\path\\to\\WebApplication",
+      "port": 8080
+    },
+    {
+      "projectPath": "WebApi\\WebApi.csproj",
+      "name": "Api",
+      "sitePath": "\\\\Mac\\Home\\path\\to\\WebApi",
+      "port": 8081
+    }
+  ]
+}

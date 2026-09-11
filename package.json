@@ -1,0 +1,53 @@
+{
+  "name": "msbuild-remote-runner",
+  "displayName": "MSBuild Remote Runner",
+  "description": "Build and run a .NET Framework / ASP.NET project via SSH on a remote Windows machine (e.g. a Parallels VM), from VS Code on macOS.",
+  "version": "0.8.0",
+  "publisher": "AriTrikesuma",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "msbuildRemote.build",
+        "title": "MSBuild Remote: Build",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "msbuildRemote.run",
+        "title": "MSBuild Remote: Run",
+        "icon": "$(play)"
+      },
+      {
+        "command": "msbuildRemote.stop",
+        "title": "MSBuild Remote: Stop",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "msbuildRemote.openConfig",
+        "title": "MSBuild Remote: Open Config File"
+      },
+      {
+        "command": "msbuildRemote.selectLaunchProfile",
+        "title": "MSBuild Remote: Select Launch Profile",
+        "icon": "$(list-selection)"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
