@@ -229,15 +229,22 @@ function getConfigPath(): string | undefined {
   return path.join(root, CONFIG_FILENAME);
 }
 
-function ensureConfigExists() {
+/**
+ * Creates the default config file, but only if the workspace actually looks
+ * like an MSBuild project (has a .sln/.csproj/etc. somewhere); otherwise
+ * there's nothing for this extension to do here, so it stays quiet.
+ * Returns whether a config file exists at configPath after this call.
+ */
+function ensureConfigExists(): boolean {
   const configPath = getConfigPath();
-  if (!configPath) return;
-  if (!fs.existsSync(configPath)) {
-    fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf8');
-    outputChannel.appendLine(
-      `Created default config at ${configPath}. Edit it before building/running.`
-    );
-  }
+  if (!configPath) return false;
+  if (fs.existsSync(configPath)) return true;
+  if (!hasVsProject()) return false;
+  fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2), 'utf8');
+  outputChannel.appendLine(
+    `Created default config at ${configPath}. Edit it before building/running.`
+  );
+  return true;
 }
 
 function loadConfig(): MsbuildRemoteConfig | undefined {
@@ -245,7 +252,12 @@ function loadConfig(): MsbuildRemoteConfig | undefined {
   if (!configPath) return undefined;
 
   if (!fs.existsSync(configPath)) {
-    ensureConfigExists();
+    if (!ensureConfigExists()) {
+      vscode.window.showErrorMessage(
+        `MSBuild Remote: no ${CONFIG_FILENAME} found, and no .sln/.csproj (or other Visual Studio project) file was found in the workspace to generate one for.`
+      );
+      return undefined;
+    }
     vscode.window
       .showWarningMessage(
         `MSBuild Remote: created ${CONFIG_FILENAME} with placeholder values. Edit it and try again.`,
@@ -287,7 +299,12 @@ function loadConfig(): MsbuildRemoteConfig | undefined {
 function openConfig() {
   const configPath = getConfigPath();
   if (!configPath) return;
-  ensureConfigExists();
+  if (!ensureConfigExists()) {
+    vscode.window.showErrorMessage(
+      `MSBuild Remote: no ${CONFIG_FILENAME} found, and no .sln/.csproj (or other Visual Studio project) file was found in the workspace to generate one for.`
+    );
+    return;
+  }
   vscode.workspace.openTextDocument(configPath).then((doc) => {
     vscode.window.showTextDocument(doc);
   });
