@@ -117,6 +117,7 @@ let outputChannel: vscode.OutputChannel;
 const runTerminals: Map<string, vscode.Terminal> = new Map();
 let activePorts: number[] = [];
 let statusBarBuild: vscode.StatusBarItem;
+let statusBarBuildProfile: vscode.StatusBarItem;
 let statusBarRun: vscode.StatusBarItem;
 let statusBarStop: vscode.StatusBarItem;
 let statusBarProfile: vscode.StatusBarItem;
@@ -129,6 +130,11 @@ export function activate(context: vscode.ExtensionContext) {
   outputChannel = vscode.window.createOutputChannel('MSBuild Remote');
 
   statusBarBuild = createStatusBarItem('$(tools) Build', 'msbuildRemote.build', 100);
+  statusBarBuildProfile = createStatusBarItem(
+    '$(package) Build Profile',
+    'msbuildRemote.buildProfile',
+    99.5
+  );
   statusBarRun = createStatusBarItem('$(play) Run', 'msbuildRemote.run', 99);
   statusBarStop = createStatusBarItem('$(debug-stop) Stop', 'msbuildRemote.stop', 98);
   statusBarProfile = createStatusBarItem(
@@ -138,12 +144,14 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('msbuildRemote.build', runBuild),
+    vscode.commands.registerCommand('msbuildRemote.build', () => runBuild(false)),
+    vscode.commands.registerCommand('msbuildRemote.buildProfile', () => runBuild(true)),
     vscode.commands.registerCommand('msbuildRemote.run', runApp),
     vscode.commands.registerCommand('msbuildRemote.stop', stopApp),
     vscode.commands.registerCommand('msbuildRemote.openConfig', openConfig),
     vscode.commands.registerCommand('msbuildRemote.selectLaunchProfile', selectLaunchProfile),
     statusBarBuild,
+    statusBarBuildProfile,
     statusBarRun,
     statusBarStop,
     statusBarProfile,
@@ -466,19 +474,61 @@ function runRemoteSetup(config: MsbuildRemoteConfig, sites: RemoteSetupSite[]): 
   });
 }
 
-function runBuild() {
+/**
+ * Resolves an .slnLaunch project's (solution-relative) Path to the absolute
+ * Windows path MSBuild needs, by joining it onto the remote solution's
+ * directory.
+ */
+function resolveProjectWindowsPath(config: MsbuildRemoteConfig, projectPath: string): string {
+  const solutionDirWindows = path.win32.dirname(config.solutionPath);
+  return `${solutionDirWindows}\\${projectPath.replace(/\//g, '\\')}`;
+}
+
+function runBuild(profileOnly: boolean) {
   const config = loadConfig();
   if (!config) return;
 
-  const remoteCommand = `${buildDriveMapPrefix(config)}"${config.msbuildPath}" "${config.solutionPath}" /p:Configuration=${config.configuration} /t:${config.target}`;
+  let projectPaths: string[];
+  let label: string;
+
+  if (profileOnly) {
+    if (!getSlnLaunchPath(config)) {
+      vscode.window.showErrorMessage(
+        `MSBuild Remote: no .slnLaunch/.slnLaunch.user file found, so there's no profile to build. Use "Build" to build the whole solution.`
+      );
+      return;
+    }
+    const projects = resolveSlnLaunchProjects(config);
+    if (!projects) return;
+    if (projects.length === 0) {
+      vscode.window.showWarningMessage('MSBuild Remote: the selected profile has no enabled projects to build.');
+      return;
+    }
+    projectPaths = projects.map((p) => resolveProjectWindowsPath(config, p.Path));
+    const profileName = getEffectiveProfileName(config, readSlnLaunchProfilesQuiet(config) || []);
+    label = `profile "${profileName}" (${projects.length} project(s))`;
+  } else {
+    projectPaths = [config.solutionPath];
+    label = 'solution';
+  }
+
+  // Chained with "&&" (not "&") so a failed project stops the build and its
+  // exit code is the one ssh/this function ultimately sees.
+  const buildCommands = projectPaths
+    .map((p) => `"${config.msbuildPath}" "${p}" /p:Configuration=${config.configuration} /t:${config.target}`)
+    .join(' && ');
+  const remoteCommand = `${buildDriveMapPrefix(config)}${buildCommands}`;
   const args = [...sshBaseArgs(config), remoteCommand];
 
   outputChannel.clear();
   outputChannel.show(true);
+  outputChannel.appendLine(`Building ${label}...`);
   outputChannel.appendLine(`$ ssh ${args.join(' ')}`);
   outputChannel.appendLine('');
 
-  statusBarBuild.text = '$(sync~spin) Building...';
+  const statusBarItem = profileOnly ? statusBarBuildProfile : statusBarBuild;
+  const idleText = profileOnly ? '$(package) Build Profile' : '$(tools) Build';
+  statusBarItem.text = '$(sync~spin) Building...';
 
   const proc = spawn('ssh', args);
 
@@ -486,10 +536,10 @@ function runBuild() {
   proc.stderr.on('data', (data) => outputChannel.append(data.toString()));
 
   proc.on('close', (code) => {
-    statusBarBuild.text = '$(tools) Build';
+    statusBarItem.text = idleText;
     if (code === 0) {
       outputChannel.appendLine('\n[Build finished: succeeded]');
-      vscode.window.showInformationMessage('MSBuild Remote: build succeeded.');
+      vscode.window.showInformationMessage(`MSBuild Remote: build succeeded (${label}).`);
     } else {
       outputChannel.appendLine(`\n[Build finished: exit code ${code}]`);
       vscode.window.showErrorMessage(`MSBuild Remote: build failed (exit code ${code}). See "MSBuild Remote" output.`);
@@ -497,7 +547,7 @@ function runBuild() {
   });
 
   proc.on('error', (err) => {
-    statusBarBuild.text = '$(tools) Build';
+    statusBarItem.text = idleText;
     vscode.window.showErrorMessage(`MSBuild Remote: failed to start ssh: ${err.message}`);
   });
 }
@@ -675,12 +725,14 @@ function refreshProfileStatusBar() {
   const config = loadConfigQuiet();
   if (!config || !getSlnLaunchPath(config)) {
     statusBarProfile.hide();
+    statusBarBuildProfile?.hide();
     return;
   }
   const profiles = readSlnLaunchProfilesQuiet(config);
   const name = profiles ? getEffectiveProfileName(config, profiles) : '(auto)';
   statusBarProfile.text = `$(list-selection) Profile: ${name}`;
   statusBarProfile.show();
+  statusBarBuildProfile?.show();
 }
 
 // Silent variants used for background status-bar refresh, so they don't pop
