@@ -159,7 +159,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   ensureConfigExists();
-  refreshProfileStatusBar();
+  updateStatusBarVisibility();
 
   // Keep the "Profile:" status bar item in sync if the user edits
   // .msbuildremote.json or the .slnLaunch file directly.
@@ -168,6 +168,16 @@ export function activate(context: vscode.ExtensionContext) {
   watcher.onDidCreate(refreshProfileStatusBar);
   watcher.onDidDelete(refreshProfileStatusBar);
   context.subscriptions.push(watcher);
+
+  // Keep all status bar items hidden/shown in sync with whether the
+  // workspace actually contains a VS solution/project file.
+  const vsProjectWatcher = vscode.workspace.createFileSystemWatcher(
+    '**/*.{sln,csproj,vbproj,fsproj,vcxproj}'
+  );
+  vsProjectWatcher.onDidCreate(updateStatusBarVisibility);
+  vsProjectWatcher.onDidDelete(updateStatusBarVisibility);
+  context.subscriptions.push(vsProjectWatcher);
+  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(updateStatusBarVisibility));
 }
 
 export function deactivate() {
@@ -183,8 +193,25 @@ function createStatusBarItem(
   item.text = text;
   item.command = command;
   item.tooltip = command;
-  item.show();
   return item;
+}
+
+/**
+ * Shows/hides the Build/Run/Stop status bar items based on whether the
+ * workspace has a VS solution/project file, and re-derives the
+ * Profile/Build Profile items' visibility on top of that.
+ */
+function updateStatusBarVisibility() {
+  if (hasVsProject()) {
+    statusBarBuild.show();
+    statusBarRun.show();
+    statusBarStop.show();
+  } else {
+    statusBarBuild.hide();
+    statusBarRun.hide();
+    statusBarStop.hide();
+  }
+  refreshProfileStatusBar();
 }
 
 function getWorkspaceRoot(): string | undefined {
@@ -588,6 +615,21 @@ function walkForFiles(dir: string, matches: (name: string) => boolean, maxDepth:
   return results;
 }
 
+const VS_PROJECT_FILE_RE = /\.(sln|csproj|vbproj|fsproj|vcxproj)$/i;
+
+/**
+ * Whether any workspace folder contains a Visual Studio solution or project
+ * file. The status bar items are only useful for MSBuild-based projects, so
+ * they're hidden entirely otherwise instead of cluttering every workspace.
+ */
+function hasVsProject(): boolean {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders) return false;
+  return folders.some(
+    (f) => walkForFiles(f.uri.fsPath, (name) => VS_PROJECT_FILE_RE.test(name), 3).length > 0
+  );
+}
+
 /**
  * Scans the workspace for a .slnLaunch / .slnLaunch.user file so users
  * don't have to point "slnLaunchFile" at it manually. Prefers a ".user"
@@ -722,6 +764,11 @@ function getEffectiveProfileName(config: MsbuildRemoteConfig, profiles: SlnLaunc
 
 function refreshProfileStatusBar() {
   if (!statusBarProfile) return;
+  if (!hasVsProject()) {
+    statusBarProfile.hide();
+    statusBarBuildProfile?.hide();
+    return;
+  }
   const config = loadConfigQuiet();
   if (!config || !getSlnLaunchPath(config)) {
     statusBarProfile.hide();
