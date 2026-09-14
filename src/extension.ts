@@ -585,15 +585,27 @@ function runBuild(profileOnly: boolean) {
 
   const configuration = getEffectiveConfiguration(config);
   const platform = getEffectivePlatform(config);
-  const platformArg = platform ? ` /p:Platform="${platform}"` : '';
+
+  // .sln files name platforms with a space ("Any CPU"), matching
+  // GlobalSection(SolutionConfigurationPlatforms) - and MSBuild's solution
+  // parser silently maps that to the project-side token ("AnyCPU") before
+  // invoking each project. That mapping only happens when building the .sln
+  // itself; building a .csproj directly (as Build Selected Profile does)
+  // needs the no-space project-side token, or it matches no
+  // Configuration|Platform condition in the .csproj and BaseOutputPath never
+  // gets set. Plain Build always targets the .sln, so it keeps the raw
+  // (possibly spaced) value.
+  const platformForProjectPath = (p: string) =>
+    !platform ? '' : /\.sln$/i.test(p) ? platform : platform.replace(/\s+/g, '');
 
   // Chained with "&&" (not "&") so a failed project stops the build and its
   // exit code is the one ssh/this function ultimately sees.
   const buildCommands = projectPaths
-    .map(
-      (p) =>
-        `"${config.msbuildPath}" "${p}" /p:Configuration="${configuration}"${platformArg} /t:${config.target}`
-    )
+    .map((p) => {
+      const effectivePlatform = platformForProjectPath(p);
+      const platformArg = effectivePlatform ? ` /p:Platform="${effectivePlatform}"` : '';
+      return `"${config.msbuildPath}" "${p}" /p:Configuration="${configuration}"${platformArg} /t:${config.target}`;
+    })
     .join(' && ');
   const remoteCommand = `${buildDriveMapPrefix(config)}${buildCommands}`;
   const args = [...sshBaseArgs(config), remoteCommand];
