@@ -31,6 +31,10 @@ interface MsbuildRemoteConfig {
   msbuildPath: string;
   solutionPath: string;
   configuration: string;
+  // Optional MSBuild platform (e.g. "Any CPU", "x86", "x64"), passed as
+  // /p:Platform. Omitted by default so MSBuild falls back to the project's
+  // own default. Overridden at runtime by "Select Configuration/Platform".
+  platform?: string;
   target: string;
   // Single-site mode (used when no .slnLaunch/.slnLaunch.user file is
   // found or configured).
@@ -121,9 +125,21 @@ let statusBarBuildProfile: vscode.StatusBarItem;
 let statusBarRun: vscode.StatusBarItem;
 let statusBarStop: vscode.StatusBarItem;
 let statusBarProfile: vscode.StatusBarItem;
+let statusBarConfig: vscode.StatusBarItem;
 let extensionContext: vscode.ExtensionContext;
 
 const SELECTED_PROFILE_KEY = 'msbuildRemote.selectedProfile';
+const SELECTED_CONFIGURATION_KEY = 'msbuildRemote.selectedConfiguration';
+const SELECTED_PLATFORM_KEY = 'msbuildRemote.selectedPlatform';
+
+const FALLBACK_CONFIG_PLATFORM_COMBOS: { configuration: string; platform: string }[] = [
+  { configuration: 'Debug', platform: 'Any CPU' },
+  { configuration: 'Release', platform: 'Any CPU' },
+  { configuration: 'Debug', platform: 'x86' },
+  { configuration: 'Release', platform: 'x86' },
+  { configuration: 'Debug', platform: 'x64' },
+  { configuration: 'Release', platform: 'x64' }
+];
 
 export function activate(context: vscode.ExtensionContext) {
   extensionContext = context;
@@ -142,6 +158,11 @@ export function activate(context: vscode.ExtensionContext) {
     'msbuildRemote.selectLaunchProfile',
     97
   );
+  statusBarConfig = createStatusBarItem(
+    '$(gear) Config: (auto)',
+    'msbuildRemote.selectConfiguration',
+    96.5
+  );
 
   context.subscriptions.push(
     vscode.commands.registerCommand('msbuildRemote.build', () => runBuild(false)),
@@ -150,11 +171,13 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('msbuildRemote.stop', stopApp),
     vscode.commands.registerCommand('msbuildRemote.openConfig', openConfig),
     vscode.commands.registerCommand('msbuildRemote.selectLaunchProfile', selectLaunchProfile),
+    vscode.commands.registerCommand('msbuildRemote.selectConfiguration', selectConfiguration),
     statusBarBuild,
     statusBarBuildProfile,
     statusBarRun,
     statusBarStop,
     statusBarProfile,
+    statusBarConfig,
     outputChannel
   );
 
@@ -176,6 +199,9 @@ export function activate(context: vscode.ExtensionContext) {
   );
   vsProjectWatcher.onDidCreate(updateStatusBarVisibility);
   vsProjectWatcher.onDidDelete(updateStatusBarVisibility);
+  // A .sln's configuration/platform combos can change on edit too (not just
+  // create/delete), so the "Config:" status bar item needs to notice those.
+  vsProjectWatcher.onDidChange(refreshConfigStatusBar);
   context.subscriptions.push(vsProjectWatcher);
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(updateStatusBarVisibility));
 }
@@ -212,6 +238,7 @@ function updateStatusBarVisibility() {
     statusBarStop.hide();
   }
   refreshProfileStatusBar();
+  refreshConfigStatusBar();
 }
 
 function getWorkspaceRoot(): string | undefined {
@@ -556,10 +583,17 @@ function runBuild(profileOnly: boolean) {
     label = 'solution';
   }
 
+  const configuration = getEffectiveConfiguration(config);
+  const platform = getEffectivePlatform(config);
+  const platformArg = platform ? ` /p:Platform="${platform}"` : '';
+
   // Chained with "&&" (not "&") so a failed project stops the build and its
   // exit code is the one ssh/this function ultimately sees.
   const buildCommands = projectPaths
-    .map((p) => `"${config.msbuildPath}" "${p}" /p:Configuration=${config.configuration} /t:${config.target}`)
+    .map(
+      (p) =>
+        `"${config.msbuildPath}" "${p}" /p:Configuration="${configuration}"${platformArg} /t:${config.target}`
+    )
     .join(' && ');
   const remoteCommand = `${buildDriveMapPrefix(config)}${buildCommands}`;
   const args = [...sshBaseArgs(config), remoteCommand];
@@ -777,6 +811,124 @@ function getEffectiveProfileName(config: MsbuildRemoteConfig, profiles: SlnLaunc
     return config.slnLaunchProfile;
   }
   return profiles[0].Name;
+}
+
+/**
+ * Resolves the effective configuration/platform: an interactively-picked
+ * value (via the status bar / command) takes priority, then falls back to
+ * the corresponding field(s) in the config file. Platform is omitted
+ * entirely (no /p:Platform passed) when neither is set.
+ */
+function getEffectiveConfiguration(config: MsbuildRemoteConfig): string {
+  const picked = extensionContext?.workspaceState.get<string>(SELECTED_CONFIGURATION_KEY);
+  return picked || config.configuration;
+}
+
+function getEffectivePlatform(config: MsbuildRemoteConfig): string | undefined {
+  const picked = extensionContext?.workspaceState.get<string>(SELECTED_PLATFORM_KEY);
+  return picked || config.platform;
+}
+
+/**
+ * Scans the workspace for a .sln file, the same way findSlnLaunchFileAuto()
+ * looks for a .slnLaunch file - preferring the shallowest match.
+ */
+function findSolutionFileAuto(root: string): string | undefined {
+  const matches = walkForFiles(root, (name) => /\.sln$/i.test(name), 3);
+  if (matches.length === 0) return undefined;
+  matches.sort((a, b) => a.split(path.sep).length - b.split(path.sep).length);
+  return matches[0];
+}
+
+/**
+ * Parses the GlobalSection(SolutionConfigurationPlatforms) block of a .sln
+ * file (lines like "Debug|Any CPU = Debug|Any CPU") to recover the actual
+ * configuration/platform combos the solution defines, so the picker offers
+ * real choices instead of a guessed list.
+ */
+function readSolutionConfigPlatforms(
+  solutionLocalPath: string
+): { configuration: string; platform: string }[] | undefined {
+  if (!fs.existsSync(solutionLocalPath)) return undefined;
+
+  const text = fs.readFileSync(solutionLocalPath, 'utf8');
+  const sectionMatch = text.match(
+    /GlobalSection\(SolutionConfigurationPlatforms\)\s*=\s*preSolution([\s\S]*?)EndGlobalSection/
+  );
+  if (!sectionMatch) return undefined;
+
+  const combos: { configuration: string; platform: string }[] = [];
+  const seen = new Set<string>();
+  const lineRe = /^\s*([^=\r\n]+?)\s*=\s*[^=\r\n]+?\s*$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = lineRe.exec(sectionMatch[1])) !== null) {
+    const pipeIdx = m[1].indexOf('|');
+    if (pipeIdx === -1) continue;
+    const configuration = m[1].slice(0, pipeIdx).trim();
+    const platform = m[1].slice(pipeIdx + 1).trim();
+    const key = `${configuration}|${platform}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    combos.push({ configuration, platform });
+  }
+
+  return combos.length > 0 ? combos : undefined;
+}
+
+interface ConfigPlatformQuickPickItem extends vscode.QuickPickItem {
+  configuration: string;
+  platform: string;
+}
+
+async function selectConfiguration() {
+  const config = loadConfig();
+  if (!config) return;
+  const root = getWorkspaceRoot();
+  if (!root) return;
+
+  const solutionLocalPath = findSolutionFileAuto(root);
+  const combos =
+    (solutionLocalPath && readSolutionConfigPlatforms(solutionLocalPath)) || FALLBACK_CONFIG_PLATFORM_COMBOS;
+
+  const currentConfiguration = getEffectiveConfiguration(config);
+  const currentPlatform = getEffectivePlatform(config);
+
+  const items: ConfigPlatformQuickPickItem[] = combos.map((c) => ({
+    label: `${c.configuration} | ${c.platform}`,
+    description:
+      c.configuration === currentConfiguration && c.platform === currentPlatform ? 'current' : undefined,
+    configuration: c.configuration,
+    platform: c.platform
+  }));
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: 'Select an MSBuild configuration/platform'
+  });
+  if (!picked) return;
+
+  await extensionContext.workspaceState.update(SELECTED_CONFIGURATION_KEY, picked.configuration);
+  await extensionContext.workspaceState.update(SELECTED_PLATFORM_KEY, picked.platform);
+  refreshConfigStatusBar();
+  vscode.window.showInformationMessage(
+    `MSBuild Remote: using configuration "${picked.configuration}|${picked.platform}".`
+  );
+}
+
+function refreshConfigStatusBar() {
+  if (!statusBarConfig) return;
+  if (!hasVsProject()) {
+    statusBarConfig.hide();
+    return;
+  }
+  const config = loadConfigQuiet();
+  if (!config) {
+    statusBarConfig.hide();
+    return;
+  }
+  const configuration = getEffectiveConfiguration(config);
+  const platform = getEffectivePlatform(config);
+  statusBarConfig.text = `$(gear) ${configuration}${platform ? ' | ' + platform : ''}`;
+  statusBarConfig.show();
 }
 
 function refreshProfileStatusBar() {

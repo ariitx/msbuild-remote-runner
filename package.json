@@ -2,7 +2,7 @@
   "name": "msbuild-remote-runner",
   "displayName": "MSBuild Remote Runner",
   "description": "Build and run a .NET Framework / ASP.NET project via SSH on a remote Windows machine (e.g. a Parallels VM), from VS Code on macOS.",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "publisher": "AriTrikesuma",
   "repository": "https://github.com/ariitx/msbuild-remote-runner",
   "engines": {
@@ -43,6 +43,11 @@
         "command": "msbuildRemote.selectLaunchProfile",
         "title": "MSBuild Remote: Select Launch Profile",
         "icon": "$(list-selection)"
+      },
+      {
+        "command": "msbuildRemote.selectConfiguration",
+        "title": "MSBuild Remote: Select Configuration/Platform",
+        "icon": "$(gear)"
       }
     ]
   },
