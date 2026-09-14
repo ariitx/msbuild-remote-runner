@@ -17,6 +17,9 @@
     { "drive": "Z", "uncPath": "\\\\Mac\\Home\\" }
   ],
 
+  "_comment_skip_build_events": "Optional. Defaults to true, blanking out each project's PreBuildEvent/PostBuildEvent so they don't run against the remote machine. Set to false to let them run normally.",
+  "skipBuildEvents": true,
+
   "_comment_multi_site": "Set these to launch multiple projects together, driven by a Visual Studio .slnLaunch / .slnLaunch.user file.",
   "slnLaunchFile": "WebApplication.slnLaunch.user",
   "slnLaunchProfile": "Feature Profile",

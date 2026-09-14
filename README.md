@@ -79,6 +79,7 @@ You can also open it directly via the Command Palette:
 | `sites`         | no  | Optional per-project overrides — sitePath/port/iisExpressPath are otherwise auto-derived, see below |
 | `autoConfigureRemote` | no | Set to `false` to skip the automatic firewall/binding setup described below (defaults to `true`) |
 | `driveMappings` | no | Map drive letter(s) via `net use` before each Build/Run SSH command - see [Drive mappings](#drive-mappings-for-postbuild-events-that-reject-unc-paths) below |
+| `skipBuildEvents` | no | Set to `false` to let each project's PreBuildEvent/PostBuildEvent run as normal (defaults to `true`, which blanks them out via `/p:PreBuildEvent=`/`/p:PostBuildEvent=` - see below) |
 
 \* Required only if you use the Run button, and only when there's no `.slnLaunch`/`.slnLaunch.user` file (auto-detected or via `slnLaunchFile`) driving multi-site mode.
 
@@ -206,6 +207,20 @@ scoping described above, without leaving a stale mapping behind afterwards.
 Add more entries to map multiple drives. Any existing mapping on the same
 letter is dropped first, so it's safe to leave configured across runs even
 if the letter is already mapped to something else.
+
+## Skipping pre/post-build events
+
+By default this extension blanks out every project's `PreBuildEvent` and
+`PostBuildEvent` for each Build (via `/p:PreBuildEvent=` /
+`/p:PostBuildEvent=`), so they never run at all. Most of these events were
+written to do something on the machine Visual Studio itself runs on -
+copying to a local path, launching a local tool - and either fail outright
+against the remote Windows VM or do something pointless there. Skipping
+them sidesteps that entirely, as an alternative to fixing each one (e.g.
+with `driveMappings` above).
+
+If you need them to actually run, set `"skipBuildEvents": false` in
+`.msbuildremote.json`.
 
 ## SSH key setup (recommended)
 

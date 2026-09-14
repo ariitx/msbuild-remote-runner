@@ -69,6 +69,12 @@ interface MsbuildRemoteConfig {
   // mapping for the same drive letter is dropped first, so this is safe to
   // re-run on every command.
   driveMappings?: DriveMapping[];
+  // Overrides each project's PreBuildEvent/PostBuildEvent to empty before
+  // building, so build events baked into the .csproj (often written for a
+  // local Visual Studio machine - copying to a local IIS path, running a
+  // local tool, etc.) don't run against the remote Windows machine at all.
+  // Defaults to true; set to false to let them run normally.
+  skipBuildEvents?: boolean;
 }
 
 interface SlnLaunchProject {
@@ -598,13 +604,21 @@ function runBuild(profileOnly: boolean) {
   const platformForProjectPath = (p: string) =>
     !platform ? '' : /\.sln$/i.test(p) ? platform : platform.replace(/\s+/g, '');
 
+  // Blanking these out overrides whatever PreBuildEvent/PostBuildEvent the
+  // .csproj itself defines - MSBuild only runs RunPreBuildEvent/
+  // RunPostBuildEvent when the property is non-empty - so any local-machine
+  // build step baked into the project is skipped rather than run against
+  // (and likely failing on) the remote Windows machine's paths/tools.
+  const buildEventOverride =
+    config.skipBuildEvents !== false ? ' /p:PreBuildEvent="" /p:PostBuildEvent=""' : '';
+
   // Chained with "&&" (not "&") so a failed project stops the build and its
   // exit code is the one ssh/this function ultimately sees.
   const buildCommands = projectPaths
     .map((p) => {
       const effectivePlatform = platformForProjectPath(p);
       const platformArg = effectivePlatform ? ` /p:Platform="${effectivePlatform}"` : '';
-      return `"${config.msbuildPath}" "${p}" /p:Configuration="${configuration}"${platformArg} /t:${config.target}`;
+      return `"${config.msbuildPath}" "${p}" /p:Configuration="${configuration}"${platformArg}${buildEventOverride} /t:${config.target}`;
     })
     .join(' && ');
   const remoteCommand = `${buildDriveMapPrefix(config)}${buildCommands}`;
